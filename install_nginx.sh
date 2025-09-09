@@ -36,17 +36,14 @@ install_docker() {
     apt-get update
     
     # Installation des dépendances
+    info "Installation des dépendances..."
     apt-get install -y ca-certificates curl gnupg
     
-    # Ajout de la clé GPG officielle de Docker
-    curl -fsSL https://download.docker.com/linux/ubuntu/gpg | apt-key add -
+    # Installation de Docker
+    curl -fsSL https://get.docker.com | sh
     
     # Ajout du repository Docker
     add-apt-repository "deb [arch=amd64] https://download.docker.com/linux/ubuntu $(lsb_release -cs) stable"
-    
-    # Installation de Docker
-    apt-get update
-    apt-get install -y docker-ce docker-ce-cli containerd.io
     
     # Ajout de l'utilisateur au groupe docker
     usermod -aG docker $SUDO_USER
