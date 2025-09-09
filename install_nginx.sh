@@ -5,14 +5,13 @@
 # Idempotent et commenté
 # ============================================
 
-set -e  # Arrêter le script si une commande échoue
+set -e  # Stop script si une commande échoue
 
 # -------- Fonctions utilitaires --------
-info() {
-    echo -e "\e[34m[INFO]\e[0m $1"
-}
+info() { echo -e "\e[34m[INFO]\e[0m $1"; }
+error() { echo -e "\e[31m[ERREUR]\e[0m $1"; }
 
-# -------- Mise à jour et installation Docker --------
+# -------- Installation Docker & Compose --------
 install_docker() {
     if ! command -v docker >/dev/null 2>&1; then
         info "Installation de Docker..."
@@ -32,22 +31,45 @@ install_docker() {
     fi
 }
 
-# -------- Création des répertoires Nginx et FTP --------
+# -------- Créer répertoires pour chaque site --------
 setup_directories() {
-    info "Création des répertoires pour Nginx et FTP..."
-    mkdir -p ~/docker/nginx/sites/site1 ~/docker/nginx/sites/site2
-    mkdir -p ~/docker/ftp/site1 ~/docker/ftp/site2
-
-    # Ajouter un index.html par défaut si non existant
-    for site in site1 site2; do
-        [[ -f ~/docker/nginx/sites/$site/index.html ]] || echo "<h1>$site fonctionne !</h1>" > ~/docker/nginx/sites/$site/index.html
-    done
+    info "Création des répertoires Nginx/FTP..."
+    mkdir -p ~/docker/nginx/conf.d
+    mkdir -p ~/docker/ftp
 }
 
-# -------- Création du docker-compose.yml --------
+# -------- Ajouter un site --------
+add_site() {
+    local site=$1
+    local ftp_user=$2
+    local ftp_pass=$3
+
+    info "Création du site '$site' avec FTP user '$ftp_user'"
+
+    # Dossiers
+    mkdir -p ~/docker/ftp/$site
+
+    # Index par défaut si vide
+    [[ -f ~/docker/ftp/$site/index.html ]] || echo "<h1>$site fonctionne !</h1>" > ~/docker/ftp/$site/index.html
+
+    # Fichier conf Nginx
+    cat > ~/docker/nginx/conf.d/$site.conf <<EOF
+server {
+    listen 80;
+    server_name $site.local;
+    root /home/vsftpd/$site;
+    index index.html;
+    location / {
+        try_files \$uri \$uri/ =404;
+    }
+}
+EOF
+}
+
+# -------- Création docker-compose.yml --------
 create_docker_compose() {
     info "Création du docker-compose.yml..."
-    cat > ~/docker/docker-compose.yml <<EOF
+    cat > ~/docker/docker-compose.yml <<'EOF'
 version: '3.8'
 
 services:
@@ -57,8 +79,8 @@ services:
     ports:
       - "80:80"
     volumes:
-      - ./nginx/sites:/usr/share/nginx/html
       - ./nginx/conf.d:/etc/nginx/conf.d
+      - ./ftp:/home/vsftpd
     networks:
       - webnet
     restart: unless-stopped
@@ -77,8 +99,7 @@ services:
       PASV_MAX_PORT: "30009"
       LOG_STDOUT: "TRUE"
     volumes:
-      - ./ftp/site1:/home/vsftpd/site1
-      - ./ftp/site2:/home/vsftpd/site2
+      - ./ftp:/home/vsftpd
     networks:
       - webnet
     restart: unless-stopped
@@ -89,52 +110,20 @@ networks:
 EOF
 }
 
-# -------- Création des fichiers de configuration Nginx --------
-create_nginx_conf() {
-    info "Création des fichiers de configuration Nginx..."
-    mkdir -p ~/docker/nginx/conf.d
-
-    # Site 1
-    cat > ~/docker/nginx/conf.d/site1.conf <<EOF
-server {
-    listen 80;
-    server_name site1.local;
-    root /usr/share/nginx/html/site1;
-    index index.html;
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
-}
-EOF
-
-    # Site 2
-    cat > ~/docker/nginx/conf.d/site2.conf <<EOF
-server {
-    listen 80;
-    server_name site2.local;
-    root /usr/share/nginx/html/site2;
-    index index.html;
-    location / {
-        try_files \$uri \$uri/ =404;
-    }
-}
-EOF
-}
-
-# -------- Lancer les conteneurs Docker --------
+# -------- Lancer conteneurs --------
 start_containers() {
     info "Lancement des conteneurs Docker..."
     cd ~/docker
     docker compose up -d
 }
 
-# -------- Test de disponibilité des sites --------
+# -------- Test des sites --------
 test_sites() {
     info "Test des sites Nginx..."
-    for site in site1 site2; do
-        curl -s http://localhost -o /dev/null
+    for site in "$@"; do
+        curl -s --connect-timeout 5 http://$site.local -o /dev/null
         if [ $? -eq 0 ]; then
-            echo "[OK] $site est accessible sur http://localhost"
+            echo "[OK] $site est accessible sur http://$site.local"
         else
             echo "[ERREUR] $site n'est pas accessible."
         fi
@@ -145,11 +134,21 @@ test_sites() {
 main() {
     install_docker
     setup_directories
-    create_nginx_conf
+
+    # Ajouter vos sites ici
+    add_site "site1" "site1" "site1pass"
+    add_site "site2" "site2" "site2pass"
+
     create_docker_compose
     start_containers
-    test_sites
-    info "Installation terminée avec succès !"
+
+    # Test
+    test_sites "site1" "site2"
+
+    info "Installation terminée !"
+    echo "N'oublie pas d'ajouter les entrées dans /etc/hosts :"
+    echo "127.0.0.1 site1.local"
+    echo "127.0.0.1 site2.local"
 }
 
 main
