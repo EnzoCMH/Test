@@ -70,7 +70,6 @@ EOF
 create_docker_compose() {
     info "Création du docker-compose.yml..."
     cat > ~/docker/docker-compose.yml <<'EOF'
-version: '3.8'
 
 services:
   nginx:
