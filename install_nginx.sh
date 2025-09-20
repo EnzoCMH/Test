@@ -9,7 +9,7 @@ set -e  # Stop script si une commande échoue
 
 # -------- Fonctions utilitaires --------
 info() { echo -e "\e[34m[INFO]\e[0m $1"; }
-error() { echo -e "\e[31m[ERREUR]\e[0m $1"; }
+error() { echo -e "\e[31m[ERREUR]\e[0m $1"; exit 1; }
 
 # -------- Installation Docker & Compose --------
 install_docker() {
@@ -38,6 +38,20 @@ setup_directories() {
     mkdir -p ~/docker/ftp
 }
 
+# -------- Générer des certificats SSL --------
+generate_ssl_certs() {
+    info "Génération des certificats SSL..."
+    mkdir -p ~/docker/nginx/ssl
+
+    # Générer un certificat auto-signé pour chaque site
+    for site in "eventhub" "meteo"; do
+        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+            -keyout ~/docker/nginx/ssl/$site.lurcat.local.key \
+            -out ~/docker/nginx/ssl/$site.lurcat.local.crt \
+            -subj "/CN=$site.lurcat.local"
+    done
+}
+
 # -------- Ajouter un site --------
 add_site() {
     local site=$1
@@ -48,19 +62,49 @@ add_site() {
 
     # Dossiers
     mkdir -p ~/docker/ftp/$site
+    mkdir -p ~/docker/ftp/$site/public
 
     # Index par défaut si vide
-    [[ -f ~/docker/ftp/$site/index.html ]] || echo "<h1>$site fonctionne !</h1>" > ~/docker/ftp/$site/index.html
+    [[ -f ~/docker/ftp/$site/public/index.php ]] || echo "<?php echo '<h1>$site fonctionne !</h1>';" > ~/docker/ftp/$site/public/index.php
 
     # Fichier conf Nginx
     cat > ~/docker/nginx/conf.d/$site.conf <<EOF
 server {
     listen 80;
-    server_name $site.local;
-    root /home/vsftpd/$site;
-    index index.html;
+    server_name $site.lurcat.local;
+    root /home/vsftpd/$site/public;
+    index index.php;
+
     location / {
-        try_files \$uri \$uri/ =404;
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass laravel:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+    }
+}
+
+server {
+    listen 443 ssl;
+    server_name $site.lurcat.local;
+    root /home/vsftpd/$site/public;
+    index index.php;
+
+    ssl_certificate /etc/nginx/ssl/$site.lurcat.local.crt;
+    ssl_certificate_key /etc/nginx/ssl/$site.lurcat.local.key;
+
+    location / {
+        try_files \$uri \$uri/ /index.php?\$query_string;
+    }
+
+    location ~ \.php$ {
+        fastcgi_pass laravel:9000;
+        fastcgi_index index.php;
+        include fastcgi_params;
+        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
     }
 }
 EOF
@@ -70,16 +114,17 @@ EOF
 create_docker_compose() {
     info "Création du docker-compose.yml..."
     cat > ~/docker/docker-compose.yml <<'EOF'
-
 services:
   nginx:
     image: nginx:latest
     container_name: nginx
     ports:
       - "80:80"
+      - "443:443"
     volumes:
       - ./nginx/conf.d:/etc/nginx/conf.d
       - ./ftp:/home/vsftpd
+      - ./nginx/ssl:/etc/nginx/ssl
     networks:
       - webnet
     restart: unless-stopped
@@ -91,14 +136,23 @@ services:
       - "21:21"
       - "30000-30009:30000-30009"
     environment:
-      FTP_USER: "site1"
-      FTP_PASS: "site1pass"
+      FTP_USER: "eventhub"
+      FTP_PASS: "eventhubpass"
       PASV_ADDRESS: "127.0.0.1"
       PASV_MIN_PORT: "30000"
       PASV_MAX_PORT: "30009"
       LOG_STDOUT: "TRUE"
     volumes:
       - ./ftp:/home/vsftpd
+    networks:
+      - webnet
+    restart: unless-stopped
+
+  laravel:
+    image: laravel:latest
+    container_name: laravel
+    volumes:
+      - ./ftp:/var/www/html
     networks:
       - webnet
     restart: unless-stopped
@@ -120,9 +174,9 @@ start_containers() {
 test_sites() {
     info "Test des sites Nginx..."
     for site in "$@"; do
-        curl -s --connect-timeout 5 http://$site.local -o /dev/null
+        curl -s --connect-timeout 5 http://$site.lurcat.local -o /dev/null
         if [ $? -eq 0 ]; then
-            echo "[OK] $site est accessible sur http://$site.local"
+            echo "[OK] $site est accessible sur http://$site.lurcat.local"
         else
             echo "[ERREUR] $site n'est pas accessible."
         fi
@@ -133,21 +187,22 @@ test_sites() {
 main() {
     install_docker
     setup_directories
+    generate_ssl_certs
 
     # Ajouter vos sites ici
-    add_site "site1" "site1" "site1pass"
-    add_site "site2" "site2" "site2pass"
+    add_site "eventhub" "eventhub" "eventhubpass"
+    add_site "meteo" "meteo" "meteopass"
 
     create_docker_compose
     start_containers
 
     # Test
-    test_sites "site1" "site2"
+    test_sites "eventhub" "meteo"
 
     info "Installation terminée !"
     echo "N'oublie pas d'ajouter les entrées dans /etc/hosts :"
-    echo "127.0.0.1 site1.local"
-    echo "127.0.0.1 site2.local"
+    echo "127.0.0.1 eventhub.lurcat.local"
+    echo "127.0.0.1 meteo.lurcat.local"
 }
 
 main
