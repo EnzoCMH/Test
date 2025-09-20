@@ -1,6 +1,7 @@
 #!/bin/bash
 # ============================================
 # Script d'installation Docker, Nginx multi-sites et FTP (vsftpd)
+# Version SANS le service PHP/Laravel
 # Compatible Debian 12
 # Idempotent et commenté
 # ============================================
@@ -45,10 +46,15 @@ generate_ssl_certs() {
 
     # Générer un certificat auto-signé pour chaque site
     for site in "eventhub" "meteo"; do
-        openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
-            -keyout ~/docker/nginx/ssl/$site.lurcat.local.key \
-            -out ~/docker/nginx/ssl/$site.lurcat.local.crt \
-            -subj "/CN=$site.lurcat.local"
+        # Ne génère que si le certificat n'existe pas déjà
+        if [ ! -f ~/docker/nginx/ssl/$site.lurcat.local.crt ]; then
+            openssl req -x509 -nodes -days 365 -newkey rsa:2048 \
+                -keyout ~/docker/nginx/ssl/$site.lurcat.local.key \
+                -out ~/docker/nginx/ssl/$site.lurcat.local.crt \
+                -subj "/CN=$site.lurcat.local"
+        else
+            info "Certificat pour $site.lurcat.local existe déjà."
+        fi
     done
 }
 
@@ -64,8 +70,8 @@ add_site() {
     mkdir -p ~/docker/ftp/$site
     mkdir -p ~/docker/ftp/$site/public
 
-    # Index par défaut si vide
-    [[ -f ~/docker/ftp/$site/public/index.php ]] || echo "<?php echo '<h1>$site fonctionne !</h1>';" > ~/docker/ftp/$site/public/index.php
+    # Fichier d'index HTML par défaut si vide (remplacement de PHP)
+    [[ -f ~/docker/ftp/$site/public/index.html ]] || echo "<h1>$site fonctionne ! (serveur statique)</h1>" > ~/docker/ftp/$site/public/index.html
 
     # Fichier conf Nginx
     cat > ~/docker/nginx/conf.d/$site.conf <<EOF
@@ -73,17 +79,10 @@ server {
     listen 80;
     server_name $site.lurcat.local;
     root /home/vsftpd/$site/public;
-    index index.php;
+    index index.html index.htm; # Priorité aux fichiers statiques
 
     location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
-
-    location ~ \.php$ {
-        fastcgi_pass laravel:9000;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        try_files \$uri \$uri/ =404;
     }
 }
 
@@ -91,20 +90,13 @@ server {
     listen 443 ssl;
     server_name $site.lurcat.local;
     root /home/vsftpd/$site/public;
-    index index.php;
+    index index.html index.htm; # Priorité aux fichiers statiques
 
     ssl_certificate /etc/nginx/ssl/$site.lurcat.local.crt;
     ssl_certificate_key /etc/nginx/ssl/$site.lurcat.local.key;
 
     location / {
-        try_files \$uri \$uri/ /index.php?\$query_string;
-    }
-
-    location ~ \.php$ {
-        fastcgi_pass laravel:9000;
-        fastcgi_index index.php;
-        include fastcgi_params;
-        fastcgi_param SCRIPT_FILENAME \$document_root\$fastcgi_script_name;
+        try_files \$uri \$uri/ =404;
     }
 }
 EOF
@@ -138,21 +130,12 @@ services:
     environment:
       FTP_USER: "eventhub"
       FTP_PASS: "eventhubpass"
-      PASV_ADDRESS: "127.0.0.1"
+      PASV_ADDRESS: "127.0.0.1" # Remplacez par votre IP publique si besoin
       PASV_MIN_PORT: "30000"
       PASV_MAX_PORT: "30009"
       LOG_STDOUT: "TRUE"
     volumes:
       - ./ftp:/home/vsftpd
-    networks:
-      - webnet
-    restart: unless-stopped
-
-  laravel:
-    image: laravel:latest
-    container_name: laravel
-    volumes:
-      - ./ftp:/var/www/html
     networks:
       - webnet
     restart: unless-stopped
@@ -167,16 +150,17 @@ EOF
 start_containers() {
     info "Lancement des conteneurs Docker..."
     cd ~/docker
-    docker compose up -d
+    docker compose up -d --remove-orphans
 }
 
 # -------- Test des sites --------
 test_sites() {
     info "Test des sites Nginx..."
     for site in "$@"; do
-        curl -s --connect-timeout 5 http://$site.lurcat.local -o /dev/null
+        # Utilise --insecure pour les certificats auto-signés
+        curl -s --insecure --connect-timeout 5 https://$site.lurcat.local -o /dev/null
         if [ $? -eq 0 ]; then
-            echo "[OK] $site est accessible sur http://$site.lurcat.local"
+            echo "[OK] $site est accessible sur https://$site.lurcat.local"
         else
             echo "[ERREUR] $site n'est pas accessible."
         fi
@@ -200,7 +184,7 @@ main() {
     test_sites "eventhub" "meteo"
 
     info "Installation terminée !"
-    echo "N'oublie pas d'ajouter les entrées dans /etc/hosts :"
+    echo "N'oublie pas d'ajouter les entrées dans ton fichier hosts local :"
     echo "127.0.0.1 eventhub.lurcat.local"
     echo "127.0.0.1 meteo.lurcat.local"
 }
