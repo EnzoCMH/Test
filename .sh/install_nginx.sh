@@ -141,8 +141,8 @@ services:
       - "30000-30009:30000-30009"
     environment:
       # Crée un utilisateur FTP pour chaque site
-      - FAURIA_VSFTPD_ADD_USER=eventhub:eventhubpass:1000:1000:/home/vsftpd/eventhub
-      - FAURIA_VSFTPD_ADD_USER=meteo:meteopass:1001:1001:/home/vsftpd/meteo
+      FTP_USER = meteo
+      FTP_PASS = meteopass
 
       PASV_ADDRESS: "127.0.0.1" # Remplacez par votre IP publique si besoin
       PASV_MIN_PORT: "30000"
