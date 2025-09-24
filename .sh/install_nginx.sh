@@ -141,15 +141,15 @@ services:
       - "30000-30009:30000-30009"
     environment:
       # Crée un utilisateur FTP pour chaque site
-      FTP_USER: eventhub
-      FTP_PASS: eventhubpass
-      FTP_USER: meteo
-      FTP_PASS: meteopass
+      - FTP_USER: eventhub
+      - FTP_PASS: eventhubpass
+      - FTP_USER: meteo
+      - FTP_PASS: meteopass
 
-      PASV_ADDRESS: "127.0.0.1" # Remplacez par votre IP publique si besoin
-      PASV_MIN_PORT: "30000"
-      PASV_MAX_PORT: "30009"
-      LOG_STDOUT: "TRUE"
+      - PASV_ADDRESS: "127.0.0.1" # Remplacez par votre IP publique si besoin
+      - PASV_MIN_PORT: "30000"
+      - PASV_MAX_PORT: "30009"
+      - LOG_STDOUT: "TRUE"
     volumes:
       - ./ftp:/home/vsftpd
     networks:
