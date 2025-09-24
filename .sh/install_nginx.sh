@@ -141,6 +141,8 @@ services:
       - "30000-30009:30000-30009"
     environment:
       # Crée un utilisateur FTP pour chaque site
+      FTP_USER = eventhub
+      FTP_PASS = eventhubpass
       FTP_USER = meteo
       FTP_PASS = meteopass
 
