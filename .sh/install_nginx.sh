@@ -141,10 +141,8 @@ services:
       - "30000-30009:30000-30009"
     environment:
       # Crée un utilisateur FTP pour chaque site
-      FTP_USER_eventhub: "eventhub"
-      FTP_PASS_eventhub: "eventhubpass"
-      FTP_USER_meteo: "meteo"
-      FTP_PASS_meteo: "meteopass"
+      - FAURIA_VSFTPD_ADD_USER=eventhub:eventhubpass:1000:1000:/home/vsftpd/eventhub
+      - FAURIA_VSFTPD_ADD_USER=meteo:meteopass:1001:1001:/home/vsftpd/meteo
 
       PASV_ADDRESS: "127.0.0.1" # Remplacez par votre IP publique si besoin
       PASV_MIN_PORT: "30000"
@@ -167,6 +165,10 @@ fix_permissions() {
     if [ -n "$SUDO_USER" ] && [ -n "$SUDO_GID" ]; then
         info "Correction des permissions pour l'utilisateur $SUDO_USER..."
         chown -R "$SUDO_USER:$SUDO_GID" "$TARGET_HOME/docker"
+        # Gestion Droit Dossier FTP / Fichier
+        chmod -R 755 "$TARGET_HOME/docker/ftp"
+        find "$TARGET_HOME/docker/ftp" -type d -exec chmod 755 {} \;  # Dossiers : rwxr-xr-x
+        find "$TARGET_HOME/docker/ftp" -type f -exec chmod 644 {} \;  # Fichiers : rw-r--r--
     fi
 }
 
